@@ -7,6 +7,7 @@
         "typescript": "^5.9.3"
     },
     "dependencies": {
-        "o1js": "^2.11.0"
+        "o1js": "^2.11.0",
+        "zkapp-cli": "^0.22.10"
     }
 }
