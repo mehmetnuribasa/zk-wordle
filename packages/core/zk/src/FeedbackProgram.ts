@@ -1,5 +1,5 @@
 import { Field, Provable, SelfProof, Struct, ZkProgram } from 'o1js';
-import { computeFeedbackFields } from './functions/feedback.js';
+import { computeFeedbackFields } from './utils/feedback.js';
 
 class publicInputs extends Struct({
   guessWord: Provable.Array(Field, 5),

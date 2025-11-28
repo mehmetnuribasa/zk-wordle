@@ -3,8 +3,8 @@ import { describe, it, before } from 'node:test';
 import assert from 'node:assert';
 
 import { CommitmentProgram } from './CommitmentProgram.js';
-import { createCommitment } from './functions/commitment.js';
-import { wordToFields } from './functions/utils.js';
+import { createCommitment } from './utils/commitment.js';
+import { wordToFields } from './utils/utils.js';
 
 describe('CommitmentProgram', () => {
   before(async () => {

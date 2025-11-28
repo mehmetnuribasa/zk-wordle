@@ -1,5 +1,5 @@
 import { Field, Provable, Struct, ZkProgram } from 'o1js';
-import { createCommitment } from './functions/commitment.js';
+import { createCommitment } from './utils/commitment.js';
 
 class privateInputs extends Struct({
   word: Provable.Array(Field, 5),
