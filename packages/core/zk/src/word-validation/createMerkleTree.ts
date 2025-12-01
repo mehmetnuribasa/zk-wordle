@@ -5,11 +5,9 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import { wordToFields } from '../utils/utils.js';
 
-// ES module equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Hash a word into a single Field commitment
 function hashWord(word: string) {
   const arr = wordToFields(word);
   return Poseidon.hash(arr);
@@ -47,9 +45,23 @@ function main() {
     )
   );
 
+  const witnesses: Record<string, { index: number; witness: string[] }> = {};
+  for (let i = 0; i < dictionary.length; i++) {
+    const word = dictionary[i];
+    const witness = tree.getWitness(BigInt(i));
+    witnesses[word] = {
+      index: i,
+      witness: witness.map((field) => field.toString()),
+    };
+  }
+
+  const witnessesPath = path.join(sourceDir, 'data/words.witnesses.json');
+  fs.writeFileSync(witnessesPath, JSON.stringify(witnesses, null, 2));
+
   console.log('Dictionary Merkle tree created.');
   console.log('Root:', root.toString());
   console.log('Height:', height);
+  console.log(`Witnesses generated for ${dictionary.length} words.`);
 }
 
 main();

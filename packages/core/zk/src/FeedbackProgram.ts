@@ -1,5 +1,6 @@
 import { Field, Provable, SelfProof, Struct, ZkProgram } from 'o1js';
 import { computeFeedbackFields } from './utils/feedback.js';
+import { CommitmentProgram } from './CommitmentProgram.js';
 
 class publicInputs extends Struct({
   guessWord: Provable.Array(Field, 5),
@@ -7,6 +8,7 @@ class publicInputs extends Struct({
 }) {}
 
 class privateInputs extends Struct({
+  previousProof: SelfProof<publicInputs, publicOutputs>,
   actualWord: Provable.Array(Field, 5),
   salt: Field,
 }) {}
@@ -23,13 +25,17 @@ const FeedbackProgram = ZkProgram({
     computeFeedback: {
       privateInputs: [privateInputs],
       async method(publicInput: publicInputs, privateInput: privateInputs) {
+        privateInput.previousProof.verify();
+        privateInput.previousProof.publicInput.commitment.assertEquals(
+          publicInput.commitment
+        );
         const feedback = computeFeedbackFields(
           privateInput.actualWord,
           publicInput.guessWord
         );
         return {
           publicOutput: {
-            feedback,
+            feedback: feedback,
           },
         };
       },
