@@ -39,7 +39,7 @@ class privateInputs extends Struct({
   witness: Provable.Array(Field, MERKLE_HEIGHT),
 }) {}
 
-const ValidationProgram = ZkProgram({
+const ValidationProgram: any = ZkProgram({
   name: 'validation-program',
   publicInput: publicInputs,
   methods: {

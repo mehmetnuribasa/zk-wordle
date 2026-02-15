@@ -10,12 +10,14 @@ class publicOutputs extends Struct({
   commitment: Field,
 }) {}
 
-const CommitmentProgram = ZkProgram({
+const CommitmentProgram: any = ZkProgram({
   name: 'commitment-program',
   publicOutput: publicOutputs,
   methods: {
     createCommitment: {
+
       privateInputs: [privateInputs],
+
       async method(privateInput: privateInputs) {
         const data = createCommitment(privateInput.word, privateInput.salt);
         return {
@@ -24,6 +26,7 @@ const CommitmentProgram = ZkProgram({
           },
         };
       },
+      
     },
   },
 });
