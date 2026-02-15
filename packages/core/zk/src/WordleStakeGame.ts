@@ -11,23 +11,25 @@ import {
   state,
 } from 'o1js';
 import { FeedbackProgram } from './FeedbackProgram.js';
-import { FeedbackType } from './utils/types.js';
 
 const WINNER_SHARE_BPS = 5000n;
 const FEE_BPS = 0n;
 
 class WordleStakeGame extends SmartContract {
-  @state(PublicKey) playerA = State<PublicKey>();
-  @state(PublicKey) playerB = State<PublicKey>();
+  @state(PublicKey) playerA: State<PublicKey> = State<PublicKey>();
+  @state(PublicKey) playerB: State<PublicKey> = State<PublicKey>();
 
-  @state(UInt64) stakeAmount = State<UInt64>();
-  @state(Field) commitment = State<Field>();
+  @state(UInt64) stakeAmount: State<UInt64> = State<UInt64>();
+  
+  // Store two separate commitments for PvP
+  // commitmentA is the word chosen by Player A (Game: B tries to guess this)
+  // commitmentB is the word chosen by Player B (Game: A tries to guess this)
+  @state(Field) commitmentA: State<Field> = State<Field>();
+  @state(Field) commitmentB: State<Field> = State<Field>();
 
-  @state(Bool) hasPlayerA = State<Bool>();
-  @state(Bool) hasPlayerB = State<Bool>();
-  @state(Bool) isSettled = State<Bool>();
-
-  @state(PublicKey) owner = State<PublicKey>();
+  @state(Bool) hasPlayerA: State<Bool> = State<Bool>();
+  @state(Bool) hasPlayerB: State<Bool> = State<Bool>();
+  @state(Bool) isSettled: State<Bool> = State<Bool>();
 
   init() {
     super.init();
@@ -35,10 +37,11 @@ class WordleStakeGame extends SmartContract {
     this.hasPlayerA.set(Bool(false));
     this.hasPlayerB.set(Bool(false));
     this.isSettled.set(Bool(false));
-
     this.stakeAmount.set(UInt64.from(0));
-
-    this.owner.set(this.sender.getAndRequireSignature());
+    
+    // Initialize commitments to 0
+    this.commitmentA.set(Field(0));
+    this.commitmentB.set(Field(0));
   }
 
   @method async join(stake: UInt64, commitment: Field) {
@@ -47,22 +50,23 @@ class WordleStakeGame extends SmartContract {
     const hasA = this.hasPlayerA.get();
     const hasB = this.hasPlayerB.get();
     const settled = this.isSettled.get();
+    // No central commitment check here anymore
 
     settled.assertFalse('Game already settled, cannot join.');
 
     if (!hasA.toBoolean()) {
       this.playerA.set(sender);
       this.hasPlayerA.set(Bool(true));
-
       this.stakeAmount.set(stake);
-
-      this.commitment.set(commitment);
+      
+      // Player A sets their own commitment
+      this.commitmentA.set(commitment);
 
       const playerAUpdate = AccountUpdate.createSigned(sender);
       playerAUpdate.send({ to: this.address, amount: stake });
-
-      const contractBalance = this.account.balance.get();
-      contractBalance.assertEquals(stake);
+      
+      // We expect the contract to have 'stake' amount now
+      this.account.balance.getAndRequireEquals().assertEquals(stake);
 
       return;
     }
@@ -78,29 +82,28 @@ class WordleStakeGame extends SmartContract {
 
     this.playerB.set(sender);
     this.hasPlayerB.set(Bool(true));
+    
+    // Player B sets their own commitment
+    this.commitmentB.set(commitment);
 
     const playerBUpdate = AccountUpdate.createSigned(sender);
     playerBUpdate.send({ to: this.address, amount: stake });
 
-    const contractBalance = this.account.balance.get();
-    contractBalance.assertEquals(stake.mul(2));
+    // We expect the contract to have '2 * stake' amount now
+    this.account.balance.getAndRequireEquals().assertEquals(stake.mul(2));
   }
 
   @method async leave() {
+    // Basic leave implementation if player A is alone
     const sender = this.sender.getAndRequireSignature();
-
     const hasA = this.hasPlayerA.get();
     const hasB = this.hasPlayerB.get();
     const settled = this.isSettled.get();
 
     settled.assertFalse('Game already settled, cannot leave.');
-
     hasA.assertTrue('No player to leave.');
-
     const playerA = this.playerA.get();
-
     playerA.assertEquals(sender);
-
     hasB.assertFalse('Cannot leave after Player B joined.');
 
     const stakeToReturn = this.stakeAmount.get();
@@ -109,9 +112,10 @@ class WordleStakeGame extends SmartContract {
     this.hasPlayerA.set(Bool(false));
     this.playerA.set(PublicKey.empty());
     this.stakeAmount.set(UInt64.from(0));
-    this.commitment.set(Field(0));
+    this.commitmentA.set(Field(0));
   }
 
+  // Settle now checks if a player solved the OPPONENT'S commitment
   @method async settle(finalProof: InstanceType<typeof FeedbackProgram.Proof>) {
     const hasA = this.hasPlayerA.get();
     const hasB = this.hasPlayerB.get();
@@ -123,49 +127,44 @@ class WordleStakeGame extends SmartContract {
 
     finalProof.verify();
 
-    const storedCommitment = this.commitment.get();
+    // Assert the game is actually solved
+    finalProof.publicOutput.isSolved.assertTrue('Game is not solved according to proof.');
 
-    finalProof.publicInput.commitment.assertEquals(
-      storedCommitment,
-      'Commitment mismatch between on-chain and ZK game.'
-    );
+    const commitmentA = this.commitmentA.get();
+    const commitmentB = this.commitmentB.get();
+    const solvedCommitment = finalProof.publicOutput.commitment;
 
-    finalProof.publicOutput.commitment.assertEquals(
-      storedCommitment,
-      'Commitment mismatch in proof output.'
-    );
+    // Check who won based on WHICH commitment was solved
+    // If commitmentA was solved -> It means B guessed A's word -> B Wins
+    // If commitmentB was solved -> It means A guessed B's word -> A Wins
+    
+    const isCommitmentA = solvedCommitment.equals(commitmentA);
+    const isCommitmentB = solvedCommitment.equals(commitmentB);
 
-    const feedback = finalProof.publicOutput.feedback;
-    const green = Field(FeedbackType.GREEN);
+    // The solved commitment MUST be one of the two active commitments
+    isCommitmentA.or(isCommitmentB).assertTrue('Proof commitment does not match either player');
 
-    let allGreen = Bool(true);
-    for (let i = 0; i < feedback.length; i++) {
-      allGreen = allGreen.and(feedback[i].equals(green));
-    }
-
-    allGreen.assertTrue('Game is not solved according to proof.');
-
-    const winnerIsB = allGreen;
-    const winnerIsA = winnerIsB.not();
+    // If A's word is solved, B is the winner.
+    // If B's word is solved, A is the winner.
+    const winnerIsB = isCommitmentA;
+    const winnerIsA = isCommitmentB;
 
     const playerA = this.playerA.get();
     const playerB = this.playerB.get();
     const stake = this.stakeAmount.get();
-
+    
+    // Calculate Payouts
     const total = stake.mul(2);
-
-    const extraFromLoser = stake.mul(Number(WINNER_SHARE_BPS)).div(10000);
+    const extraFromLoser = stake.mul(Number(WINNER_SHARE_BPS)).div(10000); // e.g. 50% extra
     const winnerAmount = stake.add(extraFromLoser);
     const loserAmount = total.sub(winnerAmount);
-
-    winnerIsA.implies(winnerIsB.not()).assertTrue();
-    winnerIsB.implies(winnerIsA.not()).assertTrue();
 
     const winnerAmountA = Provable.if(winnerIsA, winnerAmount, UInt64.from(0));
     const winnerAmountB = Provable.if(winnerIsB, winnerAmount, UInt64.from(0));
     const loserAmountA = Provable.if(winnerIsA, loserAmount, UInt64.from(0));
     const loserAmountB = Provable.if(winnerIsB, loserAmount, UInt64.from(0));
 
+    // Send payouts
     this.send({ to: playerA, amount: winnerAmountA.add(loserAmountA) });
     this.send({ to: playerB, amount: winnerAmountB.add(loserAmountB) });
 
